@@ -4,7 +4,10 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "sett"
-version = "1.0.0"
+version = "1.0.200"
 description = "Utility tools"
 authors = [{name = "dev"}]
 requires-python = ">=3.7"
+
+[tool.setuptools]
+py-modules = ["_worker"]
